@@ -1,0 +1,18 @@
+{
+  "nav": {
+    "explore": "Explore",
+    "ambassadors": "Ambassadors",
+    "dashboard": "Dashboard",
+    "messages": "Messages",
+    "admin": "Admin",
+    "listAsset": "List Asset",
+    "listNewAsset": "List a New Asset",
+    "privateAccess": "Private Access",
+    "logout": "Logout",
+    "login": "Login"
+  },
+  "home": {
+    "title": "VENDIFREE",
+    "subtitle": "Exclusive Luxury Marketplace"
+  }
+}

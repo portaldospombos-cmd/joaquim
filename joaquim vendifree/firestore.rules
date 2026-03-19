@@ -1,0 +1,206 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Firebase Auth UID)
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (optional)
+    //   - email: string (required, email format)
+    //   - photoURL: string (optional)
+    //   - createdAt: timestamp (required)
+    //   - role: string (required, 'client' or 'admin')
+    //
+    // Collection: ads
+    // Document ID: {adId} (Auto-generated)
+    // Fields:
+    //   - title: string (required, 5-100 chars)
+    //   - description: string (required, 10-2000 chars)
+    //   - price: number (required, >= 0)
+    //   - category: string (required)
+    //   - location: string (required)
+    //   - images: list (max 10 strings)
+    //   - authorId: string (required, immutable)
+    //   - authorName: string (required)
+    //   - status: string (required, enum: active, sold, deleted)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: categories
+    // Document ID: {categoryId}
+    // Fields:
+    //   - name: string (required)
+    //   - icon: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'displayName', 'email', 'photoURL', 'createdAt', 'role', 'phoneNumber', 'bio', 'updatedAt']) &&
+             data.uid == request.auth.uid &&
+             data.email is string && isValidEmail(data.email) &&
+             (!('role' in data) || data.role in ['client', 'admin']) &&
+             (!('role' in data) || data.role == 'client' || isAdmin());
+    }
+
+    function isValidAd(data) {
+      return hasRequiredFields(['title', 'description', 'price', 'category', 'authorId', 'authorName', 'status', 'transactionType', 'createdAt']) &&
+             data.title is string && data.title.size() >= 5 && data.title.size() <= 100 &&
+             data.description is string && data.description.size() >= 10 && data.description.size() <= 5000 &&
+             data.price is number && data.price >= 0 &&
+             data.category in ["Private Islands", "Superyachts", "Luxury Villas", "Exclusive Charters", "Bespoke Experiences"] &&
+             data.transactionType in ["sale", "rent"] &&
+             (data.authorId == request.auth.uid || isAdmin()) &&
+             data.status in ['active', 'sold', 'deleted'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidAmbassadorApp(data) {
+      return hasRequiredFields(['userId', 'name', 'email', 'status', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.email is string && isValidEmail(data.email) &&
+             data.status == 'pending' &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidInquiry(data) {
+      return hasRequiredFields(['adId', 'authorId', 'senderId', 'senderEmail', 'message', 'status', 'createdAt']) &&
+             data.senderId == request.auth.uid &&
+             data.authorId is string &&
+             data.senderEmail is string && isValidEmail(data.senderEmail) &&
+             data.status == 'new' &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidChat(data) {
+      return hasRequiredFields(['adId', 'buyerId', 'sellerId', 'createdAt']) &&
+             (data.buyerId == request.auth.uid || data.sellerId == request.auth.uid || isAdmin()) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidMessage(data) {
+      return hasRequiredFields(['senderId', 'text', 'createdAt']) &&
+             data.senderId == request.auth.uid &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 2000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidReservation(data) {
+      return hasRequiredFields(['adId', 'buyerId', 'sellerId', 'totalPrice', 'status', 'createdAt']) &&
+             (data.buyerId == request.auth.uid || data.sellerId == request.auth.uid || isAdmin()) &&
+             data.totalPrice is number && data.totalPrice >= 0 &&
+             data.status in ['pending', 'paid', 'cancelled'] &&
+             (!('startDate' in data) || data.startDate == null || data.startDate is string) &&
+             (!('endDate' in data) || data.endDate == null || data.endDate is string) &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /ads/{adId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidAd(request.resource.data);
+      allow update: if (isAuthenticated() && request.resource.data.authorId == resource.data.authorId && isValidAd(request.resource.data)) || isAdmin();
+      allow delete: if (isAuthenticated() && resource.data.authorId == request.auth.uid) || isAdmin();
+    }
+
+    match /ambassadors/{appId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidAmbassadorApp(request.resource.data);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /inquiries/{inquiryId} {
+      allow read: if isAuthenticated() && (resource.data.senderId == request.auth.uid || resource.data.authorId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidInquiry(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /chats/{chatId} {
+      allow read: if isAuthenticated() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidChat(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+      
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && (get(/databases/$(database)/documents/chats/$(chatId)).data.buyerId == request.auth.uid || get(/databases/$(database)/documents/chats/$(chatId)).data.sellerId == request.auth.uid || isAdmin());
+        allow create: if isAuthenticated() && isValidMessage(request.resource.data) && (get(/databases/$(database)/documents/chats/$(chatId)).data.buyerId == request.auth.uid || get(/databases/$(database)/documents/chats/$(chatId)).data.sellerId == request.auth.uid || isAdmin());
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /reservations/{reservationId} {
+      allow read: if isAuthenticated() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidReservation(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /market_analysis/{analysisId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /discussions/{discussionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /bots/{botId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

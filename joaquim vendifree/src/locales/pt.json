@@ -1,0 +1,17 @@
+{
+  "nav": {
+    "explore": "Explorar",
+    "ambassadors": "Embaixadores",
+    "dashboard": "Dashboard",
+    "messages": "Mensagens",
+    "admin": "Admin",
+    "listAsset": "Listar Ativo",
+    "privateAccess": "Acesso Privado",
+    "logout": "Sair",
+    "login": "Entrar"
+  },
+  "home": {
+    "title": "VENDIFREE",
+    "subtitle": "Mercado de Luxo Exclusivo"
+  }
+}
